@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
 // ⚠️ สำคัญ: เปลี่ยนลิงก์ด้านล่างนี้ให้เป็น URL Backend บน Render ของคุณเองนะครับ
-const socket = io('https://matching-card-game-three.vercel.app/');
+const socket = io('https://fine-wings-mate.loca.lt');
 
 export default function Player() {
   const [gameState, setGameState] = useState(null);

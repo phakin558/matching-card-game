@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
-const socket = io('https://matching-card-game-three.vercel.app/');// const socket = io('[http://192.168.1.140:3001](http://192.168.1.140:3001)');
+const socket = io('https://fine-wings-mate.loca.lt');
 
 export default function Viewer() {
   const [gameState, setGameState] = useState(null);

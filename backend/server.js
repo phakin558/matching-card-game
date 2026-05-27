@@ -6,8 +6,13 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+
+
+const io = require("socket.io")(server, {
+  cors: {
+    origin: "*", // ใส่ * คืออนุญาตให้ทุกเครื่องในวง LAN เข้าถึงได้เลย
+    methods: ["GET", "POST"]
+  }
 });
 
 const generateCards = () => {
