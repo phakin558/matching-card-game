@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
 // ⚠️ สำคัญ: เปลี่ยนลิงก์ด้านล่างนี้ให้เป็น URL Backend บน Render ของคุณเองนะครับ
-const socket = io('http://localhost:3001');
+const socket = io('https://matching-card-game-production-6288.up.railway.app');
 
 export default function Player() {
   const [gameState, setGameState] = useState(null);
