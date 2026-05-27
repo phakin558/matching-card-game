@@ -10,7 +10,6 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// สร้างการ์ด 14 คู่ (28 ใบ)
 const generateCards = () => {
   let cards = [];
   for(let i=1; i<=8; i++) {
@@ -25,7 +24,7 @@ const generateCards = () => {
 };
 
 let gameState = {
-  status: 'lobby', // lobby, intro, playing, ended
+  status: 'lobby',
   players: [], 
   cards: generateCards(),
   flippedCards: [],
@@ -36,18 +35,32 @@ let gameState = {
 io.on('connection', (socket) => {
   socket.emit('update_state', gameState);
 
+  // --- 📌 ส่วนที่แก้ไข: ระบบ Reconnect ป้องกันการกด Refresh แล้วข้อมูลหาย ---
   socket.on('join_game', (playerData) => {
-    if(gameState.players.length < 4 && !gameState.players.find(p => p.id === socket.id)) {
-      gameState.players.push({ id: socket.id, ...playerData, score: 0 });
+    // หาว่ามีผู้เล่นที่มี uniqueId นี้อยู่ในระบบแล้วหรือยัง
+    const existingPlayerIndex = gameState.players.findIndex(p => p.uniqueId === playerData.uniqueId);
+
+    if (existingPlayerIndex !== -1) {
+      // ถ้ามีอยู่แล้ว (กด Refresh) ให้แค่เปลี่ยนอัปเดต Socket ID กลับมาเป็นของปัจจุบัน
+      gameState.players[existingPlayerIndex].id = socket.id;
+      io.emit('update_state', gameState);
+    } else if (gameState.players.length < 4) {
+      // ถ้าเป็นผู้เล่นหน้าใหม่
+      gameState.players.push({
+        id: socket.id,
+        uniqueId: playerData.uniqueId, // เก็บ ID ประจำตัวถาวรไว้ด้วย
+        name: playerData.name,
+        profilePic: playerData.profilePic,
+        score: 0
+      });
       io.emit('update_state', gameState);
     }
   });
+  // --------------------------------------------------------
 
-  // --- แอดมินเริ่มเกม (โชว์เครดิตก่อน 3 วินาที) ---
   socket.on('admin_start_game', () => {
     gameState.status = 'intro';
     io.emit('update_state', gameState);
-    
     setTimeout(() => {
       gameState.status = 'playing';
       gameState.currentTurnIndex = 0;
@@ -65,7 +78,6 @@ io.on('connection', (socket) => {
     io.emit('update_state', gameState);
   });
 
-  // --- ฟีเจอร์ลับสำหรับ Admin (Test Program) ---
   socket.on('admin_adjust_score', ({ playerId, amount }) => {
     const player = gameState.players.find(p => p.id === playerId);
     if (player) {
@@ -75,14 +87,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('admin_force_end', () => {
-    // หงายทุกใบและจบเกมทันที
     const allPairIds = [...new Set(gameState.cards.map(c => c.pairId))];
     gameState.matchedPairs = allPairIds;
     gameState.status = 'ended';
     io.emit('update_state', gameState);
     io.emit('play_sfx', 'win');
   });
-  // ------------------------------------------
 
   socket.on('flip_card', (cardIndex) => {
     const currentPlayer = gameState.players[gameState.currentTurnIndex];
@@ -91,7 +101,7 @@ io.on('connection', (socket) => {
     if (gameState.flippedCards.length < 2 && !gameState.flippedCards.includes(cardIndex) && !gameState.matchedPairs.includes(gameState.cards[cardIndex].pairId)) {
       
       gameState.flippedCards.push(cardIndex);
-      io.emit('play_sfx', 'flip'); // เล่นเสียงตอนหงายไพ่
+      io.emit('play_sfx', 'flip');
       
       if (gameState.flippedCards.length === 2) {
         const [idx1, idx2] = gameState.flippedCards;
@@ -101,7 +111,6 @@ io.on('connection', (socket) => {
 
         if (isMatch) {
           gameState.matchedPairs.push(card1.pairId);
-          // ระบบคะแนนใหม่: ป้องกัน(good) = 2, เสี่ยง(bad) = 1
           const earnedPoints = card1.type === 'good' ? 2 : 1;
           currentPlayer.score += earnedPoints;
           io.emit('play_sfx', 'correct'); 
@@ -110,7 +119,6 @@ io.on('connection', (socket) => {
           gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
 
-        // เช็คจบเกมเมื่อเปิดไพ่ครบ 14 คู่ [cite: 37]
         if (gameState.matchedPairs.length === 14) {
           gameState.status = 'ended';
           io.emit('play_sfx', 'win');
