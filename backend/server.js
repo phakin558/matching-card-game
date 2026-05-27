@@ -78,6 +78,20 @@ io.on('connection', (socket) => {
     io.emit('update_state', gameState);
   });
 
+  // --- ฟีเจอร์เตะผู้เล่น ---
+  socket.on('admin_kick_player', (playerId) => {
+    const index = gameState.players.findIndex(p => p.id === playerId);
+    if (index !== -1) {
+      gameState.players.splice(index, 1); // ลบผู้เล่นคนนั้นออกจาก Array
+      
+      // ป้องกันบั๊กกรณีที่เตะคนที่กำลังเล่นอยู่ แล้ว Turn Index ทะลุจำนวนผู้เล่น
+      if (gameState.currentTurnIndex >= gameState.players.length) {
+        gameState.currentTurnIndex = 0;
+      }
+      io.emit('update_state', gameState);
+    }
+  });
+
   socket.on('admin_adjust_score', ({ playerId, amount }) => {
     const player = gameState.players.find(p => p.id === playerId);
     if (player) {

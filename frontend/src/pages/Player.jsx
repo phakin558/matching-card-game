@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
-// ⚠️ เปลี่ยนลิงก์ด้านล่างนี้ ให้เป็น URL Backend ของ Render.com ของคุณนะครับ
-const socket = io('https://matching-card-backend.onrender.com');
+// ⚠️ สำคัญ: เปลี่ยนลิงก์ด้านล่างนี้ให้เป็น URL Backend บน Render ของคุณเองนะครับ
+const socket = io('http://localhost:3001');
 
 export default function Player() {
   const [gameState, setGameState] = useState(null);
   
-  // 📌 ดึงข้อมูลจาก sessionStorage มาตั้งเป็นค่าเริ่มต้น (เผื่อว่าเคยกดจอยห้องไปแล้ว)
+  // ดึงข้อมูลจาก sessionStorage มาตั้งเป็นค่าเริ่มต้น (ป้องกันข้อมูลหายตอน Refresh)
   const [name, setName] = useState(sessionStorage.getItem('playerName') || '');
   const [profilePic, setProfilePic] = useState(sessionStorage.getItem('playerPic') || null);
   const [hasJoined, setHasJoined] = useState(sessionStorage.getItem('hasJoined') === 'true');
@@ -15,7 +15,7 @@ export default function Player() {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    // 📌 ระบบ Auto-Reconnect: ถ้าเข้ามาแล้วพบว่าเคยจอยห้อง ให้ส่ง ID กลับไปยืนยันตัวทันที
+    // ระบบ Auto-Reconnect: ถ้าเคยกดเข้าเล่นแล้ว เมื่อโหลดหน้าเว็บใหม่ให้แอบส่งข้อมูลไปยืนยันตัวทันที
     if (sessionStorage.getItem('hasJoined') === 'true') {
       const savedId = sessionStorage.getItem('playerId');
       const savedName = sessionStorage.getItem('playerName');
@@ -26,7 +26,22 @@ export default function Player() {
     socket.on('update_state', (state) => {
       setGameState(state);
 
-      // 📌 ถ้าแอดมินกด Restart ระบบ (เคลียร์ห้อง) ให้ล้างข้อมูล session ของผู้เล่นทั้งหมดด้วย
+      // 📌 [ระบบเช็คการโดนเตะ] ถ้าตรวจพบว่าเราเคยเข้าเกมไปแล้ว แต่ไม่มี ID ของเราอยู่ใน Array ผู้เล่นของ Server
+      if (sessionStorage.getItem('hasJoined') === 'true') {
+        const savedId = sessionStorage.getItem('playerId');
+        const stillInGame = state.players.some(p => p.uniqueId === savedId);
+        
+        // ถ้าไม่พบ ID ของเรา แสดงว่าโดนแอดมินกด "เตะ" ให้ทำการล้าง State ในเครื่องผู้เล่นทันที
+        if (!stillInGame) {
+          sessionStorage.clear();
+          setHasJoined(false);
+          setName('');
+          setProfilePic(null);
+          alert("💥 คุณถูกแอดมินเตะออกจากห้อง หรือเซิร์ฟเวอร์ได้รับการล้างข้อมูล!");
+        }
+      }
+
+      // ถ้าแอดมินกด Restart ระบบ (เคลียร์ผู้เล่นทุกคนในห้อง)
       if (state.status === 'lobby' && state.players.length === 0) {
         sessionStorage.clear();
         setHasJoined(false);
@@ -63,7 +78,7 @@ export default function Player() {
     if (!name.trim()) return alert('กรุณากรอกชื่อของคุณก่อนเข้าร่วมเกมครับ');
     if (!profilePic) return alert('กรุณาถ่ายรูปโปรไฟล์ของคุณก่อนครับ');
 
-    // 📌 สร้าง ID ประจำตัวแบบสุ่ม แล้วเซฟลงเครื่อง (ถ้ายังไม่มี)
+    // สร้าง ID ประจำตัวแบบสุ่มเฉพาะเครื่อง (Unique ID) บันทึกไว้ในเบราว์เซอร์
     let currentUniqueId = sessionStorage.getItem('playerId');
     if (!currentUniqueId) {
       currentUniqueId = Math.random().toString(36).substring(2, 15);
@@ -78,18 +93,19 @@ export default function Player() {
     setHasJoined(true);
   };
 
-  if (!gameState) {
+  // 📌 ปรับปรุงตรงนี้: แก้บั๊กอาการค้าง โดยเช็คว่าถ้ายังไม่ได้กด Join ให้ข้ามไปหน้ากรอกชื่อได้เลย ไม่ต้องรอโหลด gameState
+  if (!gameState && hasJoined) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-cream-50">
-        <div className="text-2xl font-bold text-cream-800 animate-pulse">กำลังเชื่อมต่อระบบเกม...</div>
+        <div className="text-2xl font-bold text-cream-800 animate-pulse">กำลังเชื่อมต่อระบบเกม... (รอ Backend ตื่น)</div>
       </div>
     );
   }
 
   // =========================================================
-  // 1. หน้า LOBBY (สมัครชื่อ ถ่ายรูป เพื่อเตรียมความพร้อม)
+  // 1. หน้า LOBBY / หน้าลงทะเบียนสมัครชื่อและถ่ายรูปภาพ
   // =========================================================
-  if (gameState.status === 'lobby' || !hasJoined) {
+  if (!gameState || gameState.status === 'lobby' || !hasJoined) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-cream-50">
         <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full border border-cream-200">
@@ -132,7 +148,7 @@ export default function Player() {
   }
 
   // =========================================================
-  // 2. หน้า INTRO (รอเริ่มเกม)
+  // 2. หน้า INTRO (เตรียมความพร้อมนับถอยหลัง)
   // =========================================================
   if (gameState.status === 'intro') {
     return (
@@ -146,7 +162,7 @@ export default function Player() {
   }
 
   // =========================================================
-  // 3. หน้า ENDED (เมื่อจบการแข่งขันและประกาศผลลัพธ์)
+  // 3. หน้า ENDED (จบเกมแสดงคะแนนดิบ)
   // =========================================================
   if (gameState.status === 'ended') {
     const myInfo = gameState.players.find(p => p.id === socket.id);
@@ -166,7 +182,7 @@ export default function Player() {
   }
 
   // =========================================================
-  // 4. หน้า PLAYING (บอร์ดกระดานสำหรับการกดเล่นจับคู่การ์ด)
+  // 4. หน้า PLAYING (กระดานเล่นเกมจับคู่การ์ดเรียลไทม์)
   // =========================================================
   const myPlayerIndex = gameState.players.findIndex(p => p.id === socket.id);
   const isMyTurn = gameState.currentTurnIndex === myPlayerIndex;
@@ -187,6 +203,7 @@ export default function Player() {
         )}
       </div>
 
+      {/* แถบรายชื่อและคะแนนผู้เล่นในเกม */}
       <div className="flex flex-wrap gap-3 mb-8 w-full justify-center">
         {gameState.players.map((p, idx) => {
           const isThisPlayerTurn = gameState.currentTurnIndex === idx;
@@ -206,6 +223,7 @@ export default function Player() {
         })}
       </div>
 
+      {/* บอร์ดการ์ดเกมจับคู่ */}
       <div className="grid grid-cols-4 md:grid-cols-7 gap-2 md:gap-4 w-full max-w-5xl">
         {gameState.cards.map((card, idx) => {
           const isFlipped = gameState.flippedCards.includes(idx) || gameState.matchedPairs.includes(card.pairId);
