@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:3001');
+const socket = io('https://matching-card-game-g59i.onrender.com');// const socket = io('[http://192.168.1.140:3001](http://192.168.1.140:3001)');
+
 
 export default function Admin() {
   const [gameState, setGameState] = useState(null);
