@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
 // ⚠️ อย่าลืมเปลี่ยนลิงก์นี้เป็น Backend ของคุณ
-const socket = io('https://fine-wings-mate.loca.lt');
+const socket = io('https://matching-card-game-wgrx.onrender.com');
 
 export default function Admin() {
   const [gameState, setGameState] = useState(null);

@@ -6,14 +6,15 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
-
-
 const io = require("socket.io")(server, {
   cors: {
-    origin: "*", // ใส่ * คืออนุญาตให้ทุกเครื่องในวง LAN เข้าถึงได้เลย
+    // ต้องใส่ URL ของหน้าเว็บ (Vercel) ของคุณให้ตรงเป๊ะๆ
+    origin: "https://matching-card-game-three.vercel.app", 
     methods: ["GET", "POST"]
   }
 });
+
+
 
 const generateCards = () => {
   let cards = [];
