@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
-const socket = io('https://matching-card-game-wgrx.onrender.com');
-
+const socket = io('https://matching-card-game-wgrx.onrender.com', {
+  transports: ['websocket']
+});
 export default function Viewer() {
   const [gameState, setGameState] = useState(null);
   const [bgmVolume, setBgmVolume] = useState(0.5); 
