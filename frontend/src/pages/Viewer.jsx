@@ -1,202 +1,125 @@
-import { useState, useEffect, useRef } from 'react';
+
+
+
+
+import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
 const socket = io('https://matching-card-game-wgrx.onrender.com');
 
 export default function Viewer() {
-  const [gameState, setGameState] = useState(null);
-  const [bgmVolume, setBgmVolume] = useState(0.5); 
-  const [sfxVolume, setSfxVolume] = useState(0.8); // เพิ่มตัวแปรสำหรับจัดการระดับเสียง Effect
-  
-  const bgmRef = useRef(new Audio('/bgm.mp3'));
-  const sfxRef = useRef(new Audio());
+  const [players, setPlayers] = useState([]);
+  const [gameState, setGameState] = useState({ status: 'waiting', cards: [] });
 
+  // บั๊กแก้ไขข้อที่ 2: ป้องกันหน่วยความจำสะสมจากการหน่วงรับสายสัญญาณซ้ำซ้อน
   useEffect(() => {
-    bgmRef.current.loop = true;
-
-    socket.on('update_state', (state) => {
-      setGameState(state);
-      if (state.status === 'playing') {
-        bgmRef.current.play().catch(e => console.log('Audio play prevented', e));
-      } else if (state.status === 'ended') {
-        bgmRef.current.pause();
-        bgmRef.current.currentTime = 0;
-      }
+    socket.on('updatePlayers', (data) => {
+      setPlayers(data);
     });
 
-    socket.on('play_sfx', (type) => {
-      sfxRef.current.src = `/${type}.mp3`;
-      sfxRef.current.play().catch(e => console.log('SFX play prevented', e));
+    socket.on('gameUpdate', (data) => {
+      setGameState(data);
     });
+
+    // ส่วนการจัดการ Preload รูปภาพไว้ล่วงหน้าเพื่อความลื่นไหลสำหรับคนดู
+    const imagesToPreload = [];
+    for (let i = 1; i <= 8; i++) {
+      imagesToPreload.push(`/images/bad_card${i}_1.webp`, `/images/bad_card${i}_2.webp`);
+    }
+    for (let i = 1; i <= 6; i++) {
+      imagesToPreload.push(`/images/good_card${i}_1.webp`, `/images/good_card${i}_2.webp`);
+    }
+    imagesToPreload.forEach(src => { const img = new Image(); img.src = src; });
 
     return () => {
-      socket.off('update_state');
-      socket.off('play_sfx');
-      bgmRef.current.pause();
+      socket.off('updatePlayers');
+      socket.off('gameUpdate');
     };
   }, []);
 
-  // อัปเดตระดับเสียง BGM ทันทีที่มีการเลื่อนแถบ
-  useEffect(() => {
-    bgmRef.current.volume = bgmVolume;
-  }, [bgmVolume]);
-
-  // อัปเดตระดับเสียง Effect ทันทีที่มีการเลื่อนแถบ
-  useEffect(() => {
-    sfxRef.current.volume = sfxVolume;
-  }, [sfxVolume]);
-
-  if (!gameState) return <div className="text-center p-10 text-2xl font-bold">Loading Viewer...</div>;
-
-  const getRankedPlayers = () => {
-    const sorted = [...gameState.players].sort((a, b) => b.score - a.score);
-    let currentRank = 1;
-    let prevScore = sorted[0]?.score;
-    return sorted.map((p) => {
-      if (p.score < prevScore) {
-        currentRank++;
-        prevScore = p.score;
-      }
-      return { ...p, rank: currentRank };
-    });
-  };
-
-  // 🎬 หน้า Intro
-  if (gameState.status === 'intro') {
-    return (
-      <div className="h-screen w-screen flex items-center justify-center bg-cream-800 animate-pulse">
-        <h1 className="text-6xl md:text-8xl font-black text-white tracking-widest text-center shadow-2xl">
-          Develop by<br/><span className="text-yellow-400">Phakin Charatsri (P'Namo)</span>
-        </h1>
-      </div>
-    );
-  }
-
-  // 🏆 หน้า Leaderboard (Ended)
-  if (gameState.status === 'ended') {
-    const rankedPlayers = getRankedPlayers();
-    return (
-      <div className="min-h-screen p-8 flex flex-col items-center justify-center bg-cream-50">
-        <h1 className="text-6xl font-black mb-16 text-cream-800 tracking-wider animate-bounce">🏆 ผู้ชนะ 🏆</h1>
-        <div className="flex items-end justify-center gap-6 h-96">
-          {rankedPlayers.map((p, idx) => (
-            <div key={idx} className="flex flex-col items-center animate-fade-in-up">
-              <span className="text-4xl font-black mb-4 text-cream-800">อันดับ {p.rank}</span>
-              <img src={p.profilePic} alt={p.name} className="w-40 h-40 rounded-full border-8 border-yellow-400 object-cover z-10 bg-white shadow-xl" />
-              <div 
-                className="w-48 bg-yellow-400 rounded-t-xl mt-[-40px] flex flex-col items-center justify-end pb-6 border-4 border-yellow-500 shadow-2xl"
-                style={{ height: `${300 - (p.rank * 50)}px` }}
-              >
-                <span className="text-2xl font-bold text-yellow-900 truncate px-2">{p.name}</span>
-                <span className="text-xl font-black text-yellow-900/80">{p.score} คะแนน</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // 🎮 หน้าเล่นเกม (Playing)
-  const currentTurnPlayer = gameState.players[gameState.currentTurnIndex];
-
   return (
-    <div className="h-screen w-screen p-4 flex flex-col items-center bg-cream-50 overflow-hidden relative">
-      
-      {/* 📌 มุมซ้ายบน: กติกาคะแนน */}
-      {gameState.status === 'playing' && (
-        <div className="absolute top-6 left-6 bg-white/90 p-4 rounded-xl shadow-lg border-2 border-cream-200 z-10">
-          <p className="font-bold text-cream-800 text-lg">🛡️ ป้องกัน = <span className="text-green-600">2 คะแนน</span></p>
-          <p className="font-bold text-cream-800 text-lg mt-1">⚠️ เสี่ยง = <span className="text-red-600">1 คะแนน</span></p>
-        </div>
-      )}
-
-      {/* 📌 มุมขวาบน: โปรไฟล์คนเล่นปัจจุบัน */}
-      {gameState.status === 'playing' && currentTurnPlayer && (
-        <div className="absolute top-6 right-6 flex flex-col items-center bg-yellow-100 p-4 rounded-3xl shadow-2xl border-4 border-yellow-500 z-10 animate-pulse">
-          <span className="text-xl font-black text-yellow-700 mb-2 tracking-wide">🔥 ตาของคนนี้ 🔥</span>
-          <img src={currentTurnPlayer.profilePic} alt="Turn" className="w-36 h-36 md:w-44 md:h-44 rounded-full border-4 border-white object-cover shadow-lg" />
-          <span className="text-lg font-black text-cream-800 mt-3 bg-white px-5 py-2 rounded-full shadow">{currentTurnPlayer.name}</span>
-        </div>
-      )}
-
-      {/* 📌 มุมซ้ายล่าง: แผงควบคุมเสียง (BGM และ SFX) */}
-      <div className="absolute bottom-6 left-6 bg-white/90 p-4 rounded-2xl shadow-xl flex flex-col gap-4 border-2 border-cream-200 z-10">
-        <div className="flex items-center gap-3">
-          <span className="text-2xl w-8 text-center">🎵</span>
-          <div className="flex flex-col">
-            <span className="text-xs font-bold text-gray-500">BGM Music</span>
-            <input 
-              type="range" min="0" max="1" step="0.05" 
-              value={bgmVolume} 
-              onChange={(e) => setBgmVolume(parseFloat(e.target.value))}
-              className="cursor-pointer w-28 accent-yellow-500"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-2xl w-8 text-center">🔊</span>
-          <div className="flex flex-col">
-            <span className="text-xs font-bold text-gray-500">Sound Effects</span>
-            <input 
-              type="range" min="0" max="1" step="0.05" 
-              value={sfxVolume} 
-              onChange={(e) => setSfxVolume(parseFloat(e.target.value))}
-              className="cursor-pointer w-28 accent-yellow-500"
-            />
-          </div>
-        </div>
-      </div>
-      
-      {/* โซนรายชื่อผู้เล่นด้านบน (ย่อให้เล็กลง) */}
-      <div className="flex gap-4 h-[12%] w-full justify-center items-center mt-2">
-        {gameState.players.map((p, idx) => {
-          const isMyTurn = gameState.status === 'playing' && gameState.currentTurnIndex === idx;
-          return (
-            <div key={idx} className={`flex items-center gap-3 p-2 px-5 rounded-2xl shadow-md transition-all duration-300 border-4
-              ${isMyTurn ? 'bg-yellow-100 border-yellow-500 scale-110 z-10 shadow-xl' : 'bg-white border-cream-200 opacity-90'}`}>
-              <img src={p.profilePic} alt={p.name} className="w-12 h-12 rounded-full border-2 border-cream-200 object-cover" />
-              <div className="flex flex-col">
-                <span className="text-lg font-black text-cream-800 truncate w-24">{p.name}</span>
-                <span className="text-sm font-bold text-cream-800/70">คะแนน: {p.score}</span>
-              </div>
-            </div>
-          );
-        })}
+    <div className="min-h-screen bg-[#FDFBF7] text-[#5C4D3C] p-6 font-sans flex flex-col items-center">
+      <div className="w-full max-w-6xl text-center mb-6">
+        <h1 className="text-4xl font-black text-[#4A3E31] tracking-wide">🏆 ตารางการจับคู่การ์ดแข่งขัน</h1>
+        <p className="text-sm text-stone-400 mt-2">หน้าจอแสดงผลหลักสำหรับบอร์ดผู้ชม (Viewer Display)</p>
       </div>
 
-      {/* กระดานเกม: กางเต็มจอ เรียงแนวนอน สีและดีไซน์อิงจาก image_758c2a.png */}
-      {gameState.status === 'playing' && (
-        <div className="flex-1 w-full flex justify-center items-center p-4 pb-8">
-          <div className="grid grid-cols-7 grid-rows-4 gap-3 md:gap-4 w-full max-w-[95vw] lg:max-w-screen-xl h-full">
-            {gameState.cards.map((card, idx) => {
-              const isFlipped = gameState.flippedCards.includes(idx) || gameState.matchedPairs.includes(card.pairId);
-              
-              // คำนวณรหัสการ์ด (เช่น แถว 1: A1..A7, แถว 2: B1..B7)
-              const rowChar = String.fromCharCode(65 + Math.floor(idx / 7)); // รหัสแถว A, B, C, D
-              const colNum = (idx % 7) + 1; // รหัสคอลัมน์ 1 ถึง 7
-              const cardLabel = `${rowChar}${colNum}`;
-
-              return (
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 w-full max-w-6xl">
+        {/* สรุปอันดับผู้นำคะแนนประจำแมทช์ */}
+        <div className="bg-white p-5 rounded-2xl border border-[#F5F0E6] shadow-sm h-fit">
+          <h2 className="text-xl font-bold mb-4 text-[#4A3E31] border-b pb-2">📊 ตารางอันดับคะแนน</h2>
+          {players.length === 0 ? (
+            <p className="text-sm text-stone-400 text-center py-6">กำลังรอผู้เล่นเข้าร่วมสนาม...</p>
+          ) : (
+            <div className="space-y-3">
+              {players.sort((a, b) => b.score - a.score).map((player, idx) => (
                 <div 
-                  key={idx} 
-                  className={`relative w-full h-full rounded-[24px] transition-all duration-500 transform flex items-center justify-center
-                    ${isFlipped ? 'bg-white border-4 border-cream-200 shadow-md rotate-0' : 'bg-gray-400 shadow-sm'}`}
+                  key={player.id} 
+                  className={`p-3 rounded-xl border flex justify-between items-center transition-all
+                    ${gameState.currentTurnPlayerId === player.id ? 'border-[#8C7A6B] bg-[#FDFBF7] scale-105' : 'border-stone-100'}
+                  `}
                 >
-                  {isFlipped ? (
-                    <img src={`/${card.image}`} alt="card" className="w-full h-full object-contain p-2 rounded-xl" />
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="font-bold text-stone-400 text-sm">#{idx + 1}</span>
+                    <span className="font-semibold text-sm truncate">{player.name}</span>
+                    {gameState.currentTurnPlayerId === player.id && <span className="text-xs bg-[#8C7A6B] text-white px-1.5 py-0.5 rounded-md animate-pulse">กำลังเล่น</span>}
+                  </div>
+                  <span className="font-black text-base text-[#8C7A6B]">{player.score} Pts</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* กระดานกลางการแข่งขันสำหรับผู้ชมลุ้น */}
+        <div className="lg:col-span-3 bg-white p-5 rounded-2xl border border-[#F5F0E6] shadow-sm">
+          {gameState.status === 'waiting' && (
+            <div className="text-center py-24 text-stone-400">
+              <div className="text-5xl mb-4 animate-spin">⏳</div>
+              <p className="text-lg font-medium">รอผู้ดูแลกดจัดการสร้างการ์ดเพื่อเริ่มกิจกรรม...</p>
+            </div>
+          )}
+
+          {gameState.status === 'playing' && (
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-3">
+              {gameState.cards.map((card) => (
+                <div 
+                  key={card.id} 
+                  className={`aspect-[3/4] rounded-xl border transition-all duration-300 flex flex-col items-center justify-center p-1 font-bold text-xs shadow-sm select-none
+                    ${card.isFlipped || card.isMatched 
+                      ? 'bg-[#FDFBF7] border-stone-200 rotate-0' 
+                      : 'bg-[#8C7A6B] border-[#736354] text-white'
+                    }
+                    ${card.isMatched ? 'opacity-30 border-green-200 bg-green-50' : ''}
+                  `}
+                >
+                  {card.isFlipped || card.isMatched ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center">
+                      <img 
+                        src={`/images/${card.image}`} 
+                        alt={card.type} 
+                        className="w-full h-full object-cover rounded-lg"
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                      <span className="text-[10px] text-stone-600 mt-1 break-all">{card.image.replace('.webp','')}</span>
+                    </div>
                   ) : (
-                    // ตัวหนังสือหมายเลขกำกับแบบจางๆ สำหรับให้คนดูอ่านง่าย
-                    <span className="text-white/30 font-black text-5xl md:text-6xl select-none drop-shadow-sm">
-                      {cardLabel}
-                    </span>
+                    <span className="text-2xl opacity-20">🃏</span>
                   )}
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
+
+          {gameState.status === 'ended' && (
+            <div className="text-center py-20 bg-[#FDFBF7] rounded-xl border border-dashed border-stone-200">
+              <div className="text-6xl mb-4">👑</div>
+              <h3 className="text-2xl font-bold text-[#4A3E31] mb-2">จบการแข่งขันประจำแมทช์</h3>
+              <p className="text-sm text-stone-400">สรุปผู้ชนะสูงสุดแสดงผลเรียบร้อยในฝั่งตารางซ้ายมือ</p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
