@@ -5,173 +5,154 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-
-// แสดงสถานะหน้าแรกของ Server แทนหน้าว่างเปล่า
-app.get('/', (req, res) => {
-  res.send('<h1>🃏 Matching Card Game Server is Online!</h1>');
-});
-
 const server = http.createServer(app);
-const io = new Server(server, {
+const io = require("socket.io")(server, {
   cors: {
-    origin: "*", // แนะนำให้เปลี่ยนเป็น URL Vercel ของคุณตอนโปรดักชัน เช่น https://your-game.vercel.app
+    // ต้องใส่ URL ของหน้าเว็บ (Vercel) ของคุณให้ตรงเป๊ะๆ
+    origin: "https://matching-card-game-three.vercel.app", 
     methods: ["GET", "POST"]
   }
 });
 
-// สถานะเริ่มต้นของเกม
-let players = [];
-let gameState = {
-  status: 'waiting', // waiting, playing, ended
-  cards: [],
-  flippedCards: [], // เก็บการ์ดที่กำลังถูกเปิดในเทิร์นนั้น [card1, card2]
-  currentTurnPlayerId: null
+
+
+const generateCards = () => {
+  let cards = [];
+  for(let i=1; i<=8; i++) {
+    cards.push({ id: `bad_${i}_1`, pairId: `bad_${i}`, image: `bad_card${i}_1.webp`, type: 'bad' });
+    cards.push({ id: `bad_${i}_2`, pairId: `bad_${i}`, image: `bad_card${i}_2.webp`, type: 'bad' });
+  }
+  for(let i=1; i<=6; i++) {
+    cards.push({ id: `good_${i}_1`, pairId: `good_${i}`, image: `good_card${i}_1.webp`, type: 'good' });
+    cards.push({ id: `good_${i}_2`, pairId: `good_${i}`, image: `good_card${i}_2.webp`, type: 'good' });
+  }
+  return cards.sort(() => Math.random() - 0.5);
 };
 
-// ฟังก์ชันสำหรับสร้างและสุ่มสำรับการ์ด (8 คู่การ์ดเสี่ยง + 6 คู่การ์ดป้องกัน)
-function generateDeck() {
-  let deck = [];
-  let id = 1;
-
-  // 1. การ์ดความเสี่ยง (bad_card) 8 คู่ = 16 ใบ
-  for (let i = 1; i <= 8; i++) {
-    deck.push({ id: id++, pairId: `bad_${i}`, image: `bad_card${i}_1.webp`, type: 'bad', isFlipped: false, isMatched: false });
-    deck.push({ id: id++, pairId: `bad_${i}`, image: `bad_card${i}_2.webp`, type: 'bad', isFlipped: false, isMatched: false });
-  }
-
-  // 2. การ์ดป้องกัน (good_card) 6 คู่ = 12 ใบ
-  for (let i = 1; i <= 6; i++) {
-    deck.push({ id: id++, pairId: `good_${i}`, image: `good_card${i}_1.webp`, type: 'good', isFlipped: false, isMatched: false });
-    deck.push({ id: id++, pairId: `good_${i}`, image: `good_card${i}_2.webp`, type: 'good', isFlipped: false, isMatched: false });
-  }
-
-  // สุ่มตำแหน่งการ์ด (Shuffle)
-  return deck.sort(() => Math.random() - 0.5);
-}
-
-// สลับเทิร์นไปยังผู้เล่นคนถัดไป
-function nextTurn() {
-  if (players.length === 0) return;
-  const currentIndex = players.findIndex(p => p.id === gameState.currentTurnPlayerId);
-  const nextIndex = (currentIndex + 1) % players.length;
-  gameState.currentTurnPlayerId = players[nextIndex].id;
-}
+let gameState = {
+  status: 'lobby',
+  players: [], 
+  cards: generateCards(),
+  flippedCards: [],
+  matchedPairs: [],
+  currentTurnIndex: 0
+};
 
 io.on('connection', (socket) => {
-  console.log(`🔌 Connected: ${socket.id}`);
+  socket.emit('update_state', gameState);
 
-  // ส่งข้อมูลปัจจุบันให้เครื่องที่เชื่อมต่อเข้ามาทันที เผื่อหลุด/รีเฟรช
-  socket.emit('updatePlayers', players);
-  socket.emit('gameUpdate', gameState);
-
-  // บั๊กแก้ไขข้อที่ 1: เข้าร่วมเกมและเช็กประวัติ ID เดิมจาก localStorage
-  socket.on('joinGame', ({ id, name }) => {
-    const existingPlayerIndex = players.findIndex(p => p.id === id);
+  // --- 📌 ส่วนที่แก้ไข: ระบบ Reconnect ป้องกันการกด Refresh แล้วข้อมูลหาย ---
+  socket.on('join_game', (playerData) => {
+    // หาว่ามีผู้เล่นที่มี uniqueId นี้อยู่ในระบบแล้วหรือยัง
+    const existingPlayerIndex = gameState.players.findIndex(p => p.uniqueId === playerData.uniqueId);
 
     if (existingPlayerIndex !== -1) {
-      // ผู้เล่นเก่ารีเฟรชหน้าเว็บ -> อัปเดต Socket ID ใหม่เข้าไปแทนที่ตัวเดิม
-      players[existingPlayerIndex].socketId = socket.id;
-      console.log(`🔄 Player Reconnected: ${name} (ID: ${id})`);
-    } else {
-      // ผู้เล่นใหม่จริงๆ -> เพิ่มชื่อเข้าไปใหม่
-      players.push({
-        id: id,
-        name: name,
-        socketId: socket.id,
+      // ถ้ามีอยู่แล้ว (กด Refresh) ให้แค่เปลี่ยนอัปเดต Socket ID กลับมาเป็นของปัจจุบัน
+      gameState.players[existingPlayerIndex].id = socket.id;
+      io.emit('update_state', gameState);
+    } else if (gameState.players.length < 4) {
+      // ถ้าเป็นผู้เล่นหน้าใหม่
+      gameState.players.push({
+        id: socket.id,
+        uniqueId: playerData.uniqueId, // เก็บ ID ประจำตัวถาวรไว้ด้วย
+        name: playerData.name,
+        profilePic: playerData.profilePic,
         score: 0
       });
-      console.log(`➕ New Player Joined: ${name}`);
+      io.emit('update_state', gameState);
     }
-    io.emit('updatePlayers', players);
+  });
+  // --------------------------------------------------------
+
+  socket.on('admin_start_game', () => {
+    gameState.status = 'intro';
+    io.emit('update_state', gameState);
+    setTimeout(() => {
+      gameState.status = 'playing';
+      gameState.currentTurnIndex = 0;
+      io.emit('update_state', gameState);
+    }, 3000);
   });
 
-  // แอดมินสั่งเริ่มเกม
-  socket.on('startGame', () => {
-    if (players.length === 0) return;
-    
-    // รีเซ็ตแต้มผู้เล่นทุกคนเป็น 0 ใหม่เมื่อเริ่มเกม
-    players.forEach(p => p.score = 0);
-    
-    gameState.status = 'playing';
-    gameState.cards = generateDeck();
+  socket.on('admin_restart_game', () => {
+    gameState.status = 'lobby';
+    gameState.players = [];
     gameState.flippedCards = [];
-    gameState.currentTurnPlayerId = players[0].id; // ให้คนแรกเล่นก่อน
-
-    io.emit('updatePlayers', players);
-    io.emit('gameUpdate', gameState);
+    gameState.matchedPairs = [];
+    gameState.cards = generateCards();
+    gameState.currentTurnIndex = 0;
+    io.emit('update_state', gameState);
   });
 
-  // ผู้เล่นคลิกเปิดการ์ด
-  socket.on('flipCard', ({ cardId, playerId }) => {
-    // ป้องกันการกดหากไม่ใช่เทิร์นตัวเอง หรือเกมไม่ได้ดำเนินอยู่
-    if (gameState.status !== 'playing' || gameState.currentTurnPlayerId !== playerId) return;
-    if (gameState.flippedCards.length >= 2) return;
-
-    const card = gameState.cards.find(c => c.id === cardId);
-    if (!card || card.isFlipped || card.isMatched) return;
-
-    // เปิดการ์ดใบที่เลือก
-    card.isFlipped = true;
-    gameState.flippedCards.push(card);
-    io.emit('gameUpdate', gameState);
-
-    // ถ้าเปิดครบ 2 ใบแล้ว ให้ทำการเช็กคู่ผลลัพธ์
-    if (gameState.flippedCards.length === 2) {
-      const [card1, card2] = gameState.flippedCards;
-
-      if (card1.pairId === card2.pairId) {
-        // ผลลัพธ์: จับคู่ถูกต้อง!
-        card1.isMatched = true;
-        card2.isMatched = true;
-        
-        // เพิ่มคะแนนให้ผู้เล่นปัจจุบัน (+1 แต้ม)
-        const player = players.find(p => p.id === playerId);
-        if (player) player.score += 1;
-
-        gameState.flippedCards = [];
-        io.emit('updatePlayers', players);
-
-        // เช็กว่าการ์ดถูกจับคู่จนหมดกระดานหรือยัง
-        const allMatched = gameState.cards.every(c => c.isMatched);
-        if (allMatched) {
-          gameState.status = 'ended';
-        }
-        io.emit('gameUpdate', gameState);
-      } else {
-        // ผลลัพธ์: จับคู่ผิด! -> ปล่อยให้เห็นรูป 1.2 วินาทีแล้วคว่ำกลับอัตโนมัติพร้อมสลับเทิร์น
-        setTimeout(() => {
-          card1.isFlipped = false;
-          card2.isFlipped = false;
-          gameState.flippedCards = [];
-          nextTurn(); // สลับเทิร์น
-          io.emit('gameUpdate', gameState);
-        }, 1200);
+  // --- ฟีเจอร์เตะผู้เล่น ---
+  socket.on('admin_kick_player', (playerId) => {
+    const index = gameState.players.findIndex(p => p.id === playerId);
+    if (index !== -1) {
+      gameState.players.splice(index, 1); // ลบผู้เล่นคนนั้นออกจาก Array
+      
+      // ป้องกันบั๊กกรณีที่เตะคนที่กำลังเล่นอยู่ แล้ว Turn Index ทะลุจำนวนผู้เล่น
+      if (gameState.currentTurnIndex >= gameState.players.length) {
+        gameState.currentTurnIndex = 0;
       }
+      io.emit('update_state', gameState);
     }
   });
 
-  // แอดมินบังคับจบเกมกลางคัน (Force End)
-  socket.on('forceEndGame', () => {
-    gameState.status = 'ended';
-    io.emit('gameUpdate', gameState);
-  });
-
-  // แอดมินปรับเพิ่ม/ลดคะแนนของผู้เล่นแบบแมนนวล
-  socket.on('adminChangeScore', ({ playerId, amount }) => {
-    const player = players.find(p => p.id === playerId);
+  socket.on('admin_adjust_score', ({ playerId, amount }) => {
+    const player = gameState.players.find(p => p.id === playerId);
     if (player) {
-      player.score = Math.max(0, player.score + amount); // คะแนนไม่ให้ติดลบ
-      io.emit('updatePlayers', players);
+      player.score += amount;
+      io.emit('update_state', gameState);
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log(`❌ Disconnected: ${socket.id}`);
-    // หมายเหตุ: จงใจไม่ลบผู้เล่นออกจาก Array ทันที เพื่อป้องกันแต้มและชื่อหายเมื่อเน็ตกระตุกหรือกด Refresh
+  socket.on('admin_force_end', () => {
+    const allPairIds = [...new Set(gameState.cards.map(c => c.pairId))];
+    gameState.matchedPairs = allPairIds;
+    gameState.status = 'ended';
+    io.emit('update_state', gameState);
+    io.emit('play_sfx', 'win');
+  });
+
+  socket.on('flip_card', (cardIndex) => {
+    const currentPlayer = gameState.players[gameState.currentTurnIndex];
+    if (!currentPlayer || currentPlayer.id !== socket.id) return;
+
+    if (gameState.flippedCards.length < 2 && !gameState.flippedCards.includes(cardIndex) && !gameState.matchedPairs.includes(gameState.cards[cardIndex].pairId)) {
+      
+      gameState.flippedCards.push(cardIndex);
+      io.emit('play_sfx', 'flip');
+      
+      if (gameState.flippedCards.length === 2) {
+        const [idx1, idx2] = gameState.flippedCards;
+        const card1 = gameState.cards[idx1];
+        const card2 = gameState.cards[idx2];
+        const isMatch = (card1.pairId === card2.pairId);
+
+        if (isMatch) {
+          gameState.matchedPairs.push(card1.pairId);
+          const earnedPoints = card1.type === 'good' ? 2 : 1;
+          currentPlayer.score += earnedPoints;
+          io.emit('play_sfx', 'correct'); 
+        } else {
+          io.emit('play_sfx', 'wrong'); 
+          gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
+        }
+
+        if (gameState.matchedPairs.length === 14) {
+          gameState.status = 'ended';
+          io.emit('play_sfx', 'win');
+        }
+        
+        setTimeout(() => {
+          gameState.flippedCards = [];
+          io.emit('update_state', gameState);
+        }, 1500);
+      }
+      io.emit('update_state', gameState);
+    }
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
